@@ -1,0 +1,3 @@
+[submodule "objective_ai_proto"]
+	path = objective_ai_proto
+	url = https://github.com/WiggidyW/objective_ai_proto
