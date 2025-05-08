@@ -9,22 +9,25 @@ import os
 from contextlib import asynccontextmanager
 from google.protobuf.wrappers_pb2 import StringValue
 from google.protobuf.struct_pb2 import Value
-from mcp.server.models import InitializationOptions
-from mcp.server.lowlevel import Server, NotificationOptions
-from mcp.server.sse import SseServerTransport
+from mcp.server.lowlevel import Server
 import mcp.types
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
+SPEC = json.load(open("./objective_ai_mcp_spec/mcp_spec.json", "r"))
 OBJECTIVE_AI_SERVER_ADDRESS = os.environ.get("OBJECTIVE_AI_SERVER_ADDRESS")
-OBJECTIVE_AI_SERVER_INSECURE = os.environ.get("OBJECTIVE_AI_SERVER_INSECURE", "").strip().lower() == "true"
+OBJECTIVE_AI_SERVER_INSECURE = (
+    os.environ.get("OBJECTIVE_AI_SERVER_INSECURE", "").strip().lower() == "true"
+)
 PORT = int(os.environ.get("PORT", "8000"))
+
 
 @dataclass
 class AppContext:
     client: grpc_proto.ObjectiveAIStub
+
 
 @asynccontextmanager
 async def app_lifespan(app: Server) -> AsyncIterator[AppContext]:
@@ -43,6 +46,7 @@ async def app_lifespan(app: Server) -> AsyncIterator[AppContext]:
     finally:
         await channel.close()
 
+
 class InvalidArgumentsError(Exception):
     def __init__(self, property: str):
         self.property = property
@@ -53,8 +57,9 @@ class InvalidArgumentsError(Exception):
                 "code": 400,
                 "error": f"invalid property: {self.property}",
             },
-            indent=2
+            indent=2,
         )
+
 
 class GrpcError(Exception):
     def __init__(self, error: grpc.aio.AioRpcError):
@@ -66,9 +71,10 @@ class GrpcError(Exception):
                 "code": int(self.error.code()),
                 "error": self.error.details(),
             },
-            indent=2
+            indent=2,
         )
-    
+
+
 class GenericError(Exception):
     def __init__(self, error: Exception):
         self.error = error
@@ -79,27 +85,21 @@ class GenericError(Exception):
                 "code": 500,
                 "error": str(self.error),
             },
-            indent=2
+            indent=2,
         )
-    
+
+
 class ObjectiveAI:
     @staticmethod
     def convert_input_schema(input_schema: Any | None) -> proto.JsonSchema:
         if input_schema is None:
-            raise InvalidArgumentsError(
-                f"schema required"
-            )
+            raise InvalidArgumentsError(f"schema required")
         if not isinstance(input_schema, dict):
-            raise InvalidArgumentsError(
-                f"schema must be a dictionary"
-            )
+            raise InvalidArgumentsError(f"schema must be a dictionary")
         schema = input_schema
         input_description = schema.get("description")
-        if input_description is not None and not \
-            isinstance(input_description, str):
-            raise InvalidArgumentsError(
-                f"schema.description must be a string"
-            )
+        if input_description is not None and not isinstance(input_description, str):
+            raise InvalidArgumentsError(f"schema.description must be a string")
         description = StringValue(value=input_description)
         match schema.get("type"):
             case "boolean":
@@ -122,9 +122,10 @@ class ObjectiveAI:
                 )
             case "string":
                 input_enum = schema.get("enum")
-                if input_enum is not None and \
-                    (not isinstance(input_enum, list) or \
-                    not all(isinstance(e, str) for e in input_enum)):
+                if input_enum is not None and (
+                    not isinstance(input_enum, list)
+                    or not all(isinstance(e, str) for e in input_enum)
+                ):
                     raise InvalidArgumentsError(
                         f"schema.enum must be a list of strings"
                     )
@@ -137,12 +138,13 @@ class ObjectiveAI:
                 )
             case "array":
                 input_items = schema.get("items")
-                if input_items is not None and \
-                    not isinstance(input_items, dict):
-                    raise InvalidArgumentsError(
-                        f"schema.items must be a dictionary"
-                    )
-                items = ObjectiveAI.convert_input_schema(input_items) if input_items else None
+                if input_items is not None and not isinstance(input_items, dict):
+                    raise InvalidArgumentsError(f"schema.items must be a dictionary")
+                items = (
+                    ObjectiveAI.convert_input_schema(input_items)
+                    if input_items
+                    else None
+                )
                 return proto.JsonSchema(
                     array=proto.ArrayJsonSchema(
                         description=description,
@@ -151,18 +153,15 @@ class ObjectiveAI:
                 )
             case "object":
                 input_properties = schema.get("properties")
-                if input_properties is not None and \
-                    not isinstance(input_properties, list):
-                    raise InvalidArgumentsError(
-                        f"schema.properties must be a list"
-                    )
+                if input_properties is not None and not isinstance(
+                    input_properties, list
+                ):
+                    raise InvalidArgumentsError(f"schema.properties must be a list")
                 properties = []
                 for input_property in input_properties:
                     input_property_name = input_property.get("name")
                     if input_property_name is None:
-                        raise InvalidArgumentsError(
-                            f"schema.properties.name required"
-                        )
+                        raise InvalidArgumentsError(f"schema.properties.name required")
                     if not isinstance(input_property_name, str):
                         raise InvalidArgumentsError(
                             f"schema.properties.name must be a string"
@@ -172,13 +171,13 @@ class ObjectiveAI:
                         raise InvalidArgumentsError(
                             f"schema.properties must be a dictionary"
                         )
-                    property_schema = ObjectiveAI.convert_input_schema(
-                        input_property
+                    property_schema = ObjectiveAI.convert_input_schema(input_property)
+                    properties.append(
+                        proto.ObjectJsonSchemaProperty(
+                            key=property_name,
+                            value=property_schema,
+                        )
                     )
-                    properties.append(proto.ObjectJsonSchemaProperty(
-                        key=property_name,
-                        value=property_schema,
-                    ))
                 return proto.JsonSchema(
                     object=proto.ObjectJsonSchema(
                         description=description,
@@ -189,84 +188,72 @@ class ObjectiveAI:
     @staticmethod
     def convert_input_messages(input_messages: Any | None) -> list[proto.Message]:
         if input_messages is None:
-            raise InvalidArgumentsError(
-                f"messages required"
-            )
+            raise InvalidArgumentsError(f"messages required")
         if not isinstance(input_messages, list):
-            raise InvalidArgumentsError(
-                f"messages must be a list"
-            )
+            raise InvalidArgumentsError(f"messages must be a list")
         if len(input_messages) == 0:
-            raise InvalidArgumentsError(
-                f"messages must not be empty"
-            )
+            raise InvalidArgumentsError(f"messages must not be empty")
         messages = []
         for input_message in input_messages:
             if not isinstance(input_message, dict):
-                raise InvalidArgumentsError(
-                    f"messages must be a list of dictionaries"
-                )
+                raise InvalidArgumentsError(f"messages must be a list of dictionaries")
             content = input_message.get("content")
             if content is None:
-                raise InvalidArgumentsError(
-                    f"message.content required"
-                )
+                raise InvalidArgumentsError(f"message.content required")
             if not isinstance(content, str):
-                raise InvalidArgumentsError(
-                    f"message.content must be a string"
-                )
+                raise InvalidArgumentsError(f"message.content must be a string")
             role = input_message.get("role")
             match role:
                 case "user":
-                    messages.append(proto.Message(
-                        user=proto.UserMessage(
-                            content=proto.MessageContent(
-                                text=content,
+                    messages.append(
+                        proto.Message(
+                            user=proto.UserMessage(
+                                content=proto.MessageContent(
+                                    text=content,
+                                )
                             )
                         )
-                    ))
+                    )
                 case "assistant":
-                    messages.append(proto.Message(
-                        assistant=proto.AssistantMessage(
-                            content=proto.MessageContent(
-                                text=content,
-                            ),
-                            tool_calls=None,
-                        )
-                    ))
-                case "system":
-                    messages.append(proto.Message(
-                        system=proto.SystemMessage(
-                            content=proto.MessageContent(
-                                text=content,
+                    messages.append(
+                        proto.Message(
+                            assistant=proto.AssistantMessage(
+                                content=proto.MessageContent(
+                                    text=content,
+                                ),
+                                tool_calls=None,
                             )
                         )
-                    ))
+                    )
+                case "system":
+                    messages.append(
+                        proto.Message(
+                            system=proto.SystemMessage(
+                                content=proto.MessageContent(
+                                    text=content,
+                                )
+                            )
+                        )
+                    )
                 case _:
                     raise InvalidArgumentsError(
                         f"message.role must be one of user, assistant, system"
                     )
         return messages
-    
+
     @staticmethod
     def convert_input_meta_model(input_meta_model: Any | None) -> str:
         if input_meta_model is None:
-            raise InvalidArgumentsError(
-                f"meta_model required"
-            )
+            raise InvalidArgumentsError(f"meta_model required")
         if not isinstance(input_meta_model, str):
-            raise InvalidArgumentsError(
-                f"meta_model must be a string"
-            )
+            raise InvalidArgumentsError(f"meta_model must be a string")
         if not input_meta_model in ["objectiveai/pauper_1"]:
-            raise InvalidArgumentsError(
-                f"invalid meta model: {input_meta_model}"
-            )
+            raise InvalidArgumentsError(f"invalid meta model: {input_meta_model}")
         return input_meta_model
-    
+
     @staticmethod
     def convert_value(value: Value) -> Any:
-        match value.WhichOneof('kind'):
+        match value.WhichOneof("kind"):
             case "null_value":
                 return None
             case "number_value":
@@ -276,24 +263,29 @@ class ObjectiveAI:
             case "bool_value":
                 return value.bool_value
             case "struct_value":
-                return {key: ObjectiveAI.convert_value(val) for key, val in value.struct_value.fields.items()}
+                return {
+                    key: ObjectiveAI.convert_value(val)
+                    for key, val in value.struct_value.fields.items()
+                }
             case "list_value":
-                return [ObjectiveAI.convert_value(val) for val in value.list_value.values]
+                return [
+                    ObjectiveAI.convert_value(val) for val in value.list_value.values
+                ]
             case _:
                 raise Exception("invalid proto value kind")
-            
+
     # class Reasoning(TypedDict):
     #     expert_name: str
     #     reasoning: str
-    
+
     class Choice(TypedDict):
         id: str
         reasoning: list[str]
         response: Any
         response_confidence: float
-    
+
     class Response(TypedDict):
-        choices: list['ObjectiveAI.Choice']
+        choices: list["ObjectiveAI.Choice"]
         winner_id: str
         winner_confidence: float
 
@@ -302,7 +294,9 @@ class ObjectiveAI:
         messages: Any,
         schema: Any,
         ctx: AppContext,
-    ) -> list[mcp.types.TextContent | mcp.types.ImageContent | mcp.types.EmbeddedResource]:
+    ) -> list[
+        mcp.types.TextContent | mcp.types.ImageContent | mcp.types.EmbeddedResource
+    ]:
         client = ctx.client
         request = proto.QueryRequest(
             meta_model=ObjectiveAI.convert_input_meta_model(meta_model),
@@ -328,9 +322,11 @@ class ObjectiveAI:
             if item == grpc.aio.EOF:
                 break
             item = cast(proto.QueryStreamingResponse, item)
-            if item.choice is not None and \
-                item.choice.id is not None and \
-                len(item.choice.id) > 0:
+            if (
+                item.choice is not None
+                and item.choice.id is not None
+                and len(item.choice.id) > 0
+            ):
                 vote = item.choice.votes[0]
                 response["choices"].append(
                     ObjectiveAI.Choice(
@@ -340,40 +336,43 @@ class ObjectiveAI:
                         response_confidence=item.choice.confidence,
                     )
                 )
-            elif item.vote is not None and \
-                item.vote.id is not None and \
-                len(item.vote.id) > 0:
+            elif (
+                item.vote is not None
+                and item.vote.id is not None
+                and len(item.vote.id) > 0
+            ):
                 choice = next(
                     (c for c in response["choices"] if c["id"] == vote.id),
                     None,
                 )
                 choice["reasoning"].append(vote.reasoning)
-            elif item.choice_confidence is not None and \
-                len(item.choice_confidence.confidence) > 0:
+            elif (
+                item.choice_confidence is not None
+                and len(item.choice_confidence.confidence) > 0
+            ):
                 for choice in response["choices"]:
-                    choice["response_confidence"] = \
-                        item.choice_confidence.confidence[choice["id"]]
+                    choice["response_confidence"] = item.choice_confidence.confidence[
+                        choice["id"]
+                    ]
                 response["choices"].sort(
-                    key=lambda x: x["response_confidence"],
-                    reverse=True
+                    key=lambda x: x["response_confidence"], reverse=True
                 )
                 if len(response["choices"]) > 0:
-                    response["winner_id"] = \
-                        response["choices"][0]["id"]
-                    response["winner_confidence"] = \
-                        response["choices"][0]["response_confidence"]
+                    response["winner_id"] = response["choices"][0]["id"]
+                    response["winner_confidence"] = response["choices"][0][
+                        "response_confidence"
+                    ]
             else:
                 raise Exception("invalid query streaming response kind")
             i += 1
         return [
-            mcp.types.EmbeddedResource(
-                type="text",
-                text=json.dumps(response, indent=2)
-            )
+            mcp.types.EmbeddedResource(type="text", text=json.dumps(response, indent=2))
         ]
 
+
 app = Server("Objective AI", lifespan=app_lifespan)
-    
+
+
 @app.list_tools()
 async def list_tools() -> list[mcp.types.Tool]:
     return [
@@ -435,10 +434,7 @@ async def list_tools() -> list[mcp.types.Tool]:
                                 "required": ["type", "name", "description"],
                                 "additionalProperties": False,
                                 "properties": {
-                                    "type": {
-                                        "type": "string",
-                                        "enum": ["boolean"]
-                                    },
+                                    "type": {"type": "string", "enum": ["boolean"]},
                                     "name": {
                                         "type": "string",
                                     },
@@ -452,10 +448,7 @@ async def list_tools() -> list[mcp.types.Tool]:
                                 "required": ["type", "name", "description"],
                                 "additionalProperties": False,
                                 "properties": {
-                                    "type": {
-                                        "type": "string",
-                                        "enum": ["integer"]
-                                    },
+                                    "type": {"type": "string", "enum": ["integer"]},
                                     "name": {
                                         "type": "string",
                                     },
@@ -469,10 +462,7 @@ async def list_tools() -> list[mcp.types.Tool]:
                                 "required": ["type", "name", "description"],
                                 "additionalProperties": False,
                                 "properties": {
-                                    "type": {
-                                        "type": "string",
-                                        "enum": ["number"]
-                                    },
+                                    "type": {"type": "string", "enum": ["number"]},
                                     "name": {
                                         "type": "string",
                                     },
@@ -486,10 +476,7 @@ async def list_tools() -> list[mcp.types.Tool]:
                                 "required": ["type", "name", "description", "enum"],
                                 "additionalProperties": False,
                                 "properties": {
-                                    "type": {
-                                        "type": "string",
-                                        "enum": ["string"]
-                                    },
+                                    "type": {"type": "string", "enum": ["string"]},
                                     "name": {
                                         "type": "string",
                                     },
@@ -509,10 +496,7 @@ async def list_tools() -> list[mcp.types.Tool]:
                                 "required": ["type", "name", "description", "items"],
                                 "additionalProperties": False,
                                 "properties": {
-                                    "type": {
-                                        "type": "string",
-                                        "enum": ["array"]
-                                    },
+                                    "type": {"type": "string", "enum": ["array"]},
                                     "name": {
                                         "type": "string",
                                     },
@@ -526,13 +510,15 @@ async def list_tools() -> list[mcp.types.Tool]:
                             },
                             {
                                 "type": "object",
-                                "required": ["type", "name", "description", "properties"],
+                                "required": [
+                                    "type",
+                                    "name",
+                                    "description",
+                                    "properties",
+                                ],
                                 "additionalProperties": False,
                                 "properties": {
-                                    "type": {
-                                        "type": "string",
-                                        "enum": ["object"]
-                                    },
+                                    "type": {"type": "string", "enum": ["object"]},
                                     "name": {
                                         "type": "string",
                                     },
@@ -553,6 +539,7 @@ async def list_tools() -> list[mcp.types.Tool]:
             },
         )
     ]
+
 
 @app.call_tool()
 async def call_tool(
@@ -576,7 +563,8 @@ async def call_tool(
         raise GrpcError(e)
     except Exception as e:
         raise GenericError(e)
-        
+
+
 def run():
     from mcp.server.sse import SseServerTransport
     from starlette.applications import Starlette
@@ -590,11 +578,9 @@ def run():
         async with sse.connect_sse(
             request.scope, request.receive, request._send
         ) as streams:
-            await app.run(
-                streams[0], streams[1], app.create_initialization_options()
-            )
+            await app.run(streams[0], streams[1], app.create_initialization_options())
         return Response()
-    
+
     uvicorn.run(
         Starlette(
             debug=True,
@@ -607,6 +593,7 @@ def run():
         host="0.0.0.0",
         port=PORT,
     )
+
 
 if __name__ == "__main__":
     run()
