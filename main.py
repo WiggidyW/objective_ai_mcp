@@ -15,13 +15,35 @@ import mcp.types
 from dotenv import load_dotenv
 
 load_dotenv()
-
-SPEC = json.load(open("./objective_ai_mcp_spec/mcp_spec.json", "r"))
 OBJECTIVE_AI_SERVER_ADDRESS = os.environ.get("OBJECTIVE_AI_SERVER_ADDRESS")
 OBJECTIVE_AI_SERVER_INSECURE = (
     os.environ.get("OBJECTIVE_AI_SERVER_INSECURE", "").strip().lower() == "true"
 )
 PORT = int(os.environ.get("PORT", "8000"))
+
+
+class Spec(TypedDict):
+    list_tools: list[mcp.types.Tool]
+    list_prompts: list[mcp.types.Prompt]
+    prompts: dict[str, mcp.types.PromptMessage]
+
+
+def load_spec() -> Spec:
+    with open("./objective_ai_mcp_spec/mcp_spec.json", "r") as f:
+        spec = json.load(f)
+        return Spec(
+            list_tools=[mcp.types.Tool(**tool) for tool in spec["list_tools"]],
+            list_prompts=[
+                mcp.types.Prompt(**prompt) for prompt in spec["list_prompts"]
+            ],
+            prompts={
+                name: mcp.types.PromptMessage(**prompt)
+                for name, prompt in spec["prompts"].items()
+            },
+        )
+
+
+SPEC = load_spec()
 
 
 @dataclass
@@ -373,172 +395,28 @@ class ObjectiveAI:
 app = Server("Objective AI", lifespan=app_lifespan)
 
 
+@app.list_prompts()
+async def list_prompts() -> list[mcp.types.Prompt]:
+    print("list_prompts")
+    return SPEC["list_prompts"]
+
+
 @app.list_tools()
 async def list_tools() -> list[mcp.types.Tool]:
-    return [
-        mcp.types.Tool(
-            name="query_objective_ai",
-            description="Query Objective AI. Get a JSON response to an objective query.",
-            annotations=mcp.types.ToolAnnotations(
-                title="Objective AI",
-                readOnlyHint=True,
-                destructiveHint=False,
-                idempotentHint=True,
-                openWorldHint=False,
-            ),
-            inputSchema={
-                "type": "object",
-                "required": ["meta_model", "messages", "schema"],
-                "additionalProperties": False,
-                "properties": {
-                    "meta_model": {
-                        "description": "Objective AI MetaModel.",
-                        "type": "string",
-                        "enum": [
-                            "objectiveai/pauper_1",
-                        ],
-                    },
-                    "messages": {
-                        "description": "Objective AI query. Conforms to the OpenAI API chat message format.",
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "required": ["role", "content"],
-                            "additionalProperties": False,
-                            "properties": {
-                                "role": {
-                                    "description": "Role of the message sender",
-                                    "type": "string",
-                                    "enum": [
-                                        "user",
-                                        "assistant",
-                                        "system",
-                                    ],
-                                },
-                                "content": {
-                                    "description": "Content of the message",
-                                    "type": "string",
-                                },
-                            },
-                        },
-                    },
-                    "schema": {
-                        "$ref": "#/$defs/schema",
-                    },
-                },
-                "$defs": {
-                    "schema": {
-                        "anyOf": [
-                            {
-                                "type": "object",
-                                "required": ["type", "name", "description"],
-                                "additionalProperties": False,
-                                "properties": {
-                                    "type": {"type": "string", "enum": ["boolean"]},
-                                    "name": {
-                                        "type": "string",
-                                    },
-                                    "description": {
-                                        "type": "string",
-                                    },
-                                },
-                            },
-                            {
-                                "type": "object",
-                                "required": ["type", "name", "description"],
-                                "additionalProperties": False,
-                                "properties": {
-                                    "type": {"type": "string", "enum": ["integer"]},
-                                    "name": {
-                                        "type": "string",
-                                    },
-                                    "description": {
-                                        "type": "string",
-                                    },
-                                },
-                            },
-                            {
-                                "type": "object",
-                                "required": ["type", "name", "description"],
-                                "additionalProperties": False,
-                                "properties": {
-                                    "type": {"type": "string", "enum": ["number"]},
-                                    "name": {
-                                        "type": "string",
-                                    },
-                                    "description": {
-                                        "type": "string",
-                                    },
-                                },
-                            },
-                            {
-                                "type": "object",
-                                "required": ["type", "name", "description", "enum"],
-                                "additionalProperties": False,
-                                "properties": {
-                                    "type": {"type": "string", "enum": ["string"]},
-                                    "name": {
-                                        "type": "string",
-                                    },
-                                    "description": {
-                                        "type": "string",
-                                    },
-                                    "enum": {
-                                        "type": ["array", "null"],
-                                        "items": {
-                                            "type": "string",
-                                        },
-                                    },
-                                },
-                            },
-                            {
-                                "type": "object",
-                                "required": ["type", "name", "description", "items"],
-                                "additionalProperties": False,
-                                "properties": {
-                                    "type": {"type": "string", "enum": ["array"]},
-                                    "name": {
-                                        "type": "string",
-                                    },
-                                    "description": {
-                                        "type": "string",
-                                    },
-                                    "items": {
-                                        "$ref": "#/$defs/schema",
-                                    },
-                                },
-                            },
-                            {
-                                "type": "object",
-                                "required": [
-                                    "type",
-                                    "name",
-                                    "description",
-                                    "properties",
-                                ],
-                                "additionalProperties": False,
-                                "properties": {
-                                    "type": {"type": "string", "enum": ["object"]},
-                                    "name": {
-                                        "type": "string",
-                                    },
-                                    "description": {
-                                        "type": "string",
-                                    },
-                                    "properties": {
-                                        "type": "array",
-                                        "items": {
-                                            "$ref": "#/$defs/schema",
-                                        },
-                                    },
-                                },
-                            },
-                        ],
-                    },
-                },
-            },
-        )
-    ]
+    print("list_tools")
+    return SPEC["list_tools"]
+
+
+@app.get_prompt()
+async def get_prompt(
+    name: str,
+    arguments: dict[str, str] | None,
+) -> mcp.types.GetPromptResult:
+    print(f"get_prompt {name} {arguments}")
+    prompt = SPEC["prompts"].get(name)
+    if prompt is None:
+        raise InvalidArgumentsError(f"invalid prompt name: {name}")
+    return prompt
 
 
 @app.call_tool()
@@ -547,7 +425,7 @@ async def call_tool(
     argument: dict[str, Any],
 ) -> list[mcp.types.TextContent | mcp.types.ImageContent | mcp.types.EmbeddedResource]:
     ctx = app.request_context.lifespan_context
-    print(f"call_tool: {name} {argument}")
+    print(f"call_tool {name} {argument}")
     try:
         match name:
             case "query_objective_ai":
