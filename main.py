@@ -25,7 +25,7 @@ PORT = int(os.environ.get("PORT", "8000"))
 class Spec(TypedDict):
     list_tools: list[mcp.types.Tool]
     list_prompts: list[mcp.types.Prompt]
-    prompts: dict[str, mcp.types.PromptMessage]
+    prompts: dict[str, mcp.types.GetPromptResult]
 
 
 def load_spec() -> Spec:
@@ -37,7 +37,7 @@ def load_spec() -> Spec:
                 mcp.types.Prompt(**prompt) for prompt in spec["list_prompts"]
             ],
             prompts={
-                name: mcp.types.PromptMessage(**prompt)
+                name: mcp.types.GetPromptResult(**prompt)
                 for name, prompt in spec["prompts"].items()
             },
         )
