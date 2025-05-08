@@ -337,8 +337,8 @@ class ObjectiveAI:
             ],
             client.QueryStreaming(request),
         )
-        i = 0
-        i_max = 27
+        # i = 0
+        # i_max = 27
         while True:
             item = await stream.read()
             if item == grpc.aio.EOF:
@@ -386,7 +386,7 @@ class ObjectiveAI:
                     ]
             else:
                 raise Exception("invalid query streaming response kind")
-            i += 1
+            # i += 1
         return [
             mcp.types.EmbeddedResource(type="text", text=json.dumps(response, indent=2))
         ]
