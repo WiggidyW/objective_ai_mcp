@@ -1,3 +1,6 @@
 [submodule "objective_ai_proto"]
 	path = objective_ai_proto
-	url = https://github.com/WiggidyW/objective_ai_proto
+	url = https://github.com/WiggidyW/objective_ai_proto.git
+[submodule "objective_ai_mcp_spec"]
+	path = objective_ai_mcp_spec
+	url = https://github.com/WiggidyW/objective_ai_mcp_spec.git
